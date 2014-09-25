@@ -32,14 +32,14 @@ class DoubanSpider(object):
             'login':'登录',
         }
         self.header = {
-            'User-agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.9; rv:32.0) Gecko/20100101 Firefox/32.0',
-            '(Request-Line)':'POST /group/topic/62688349/add_comment HTTP/1.1',
+            'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.9; rv:32.0) Gecko/20100101 Firefox/32.0',
             'Host':'www.douban.com',
             'Accept-Language':'zh-cn,zh;q=0.8,en-us;q=0.5,en;q=0.3',
-            'Connetcting':'keep-alive'
+            'Connetcting':'keep-alive',
+            'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         }
         self.session = requests.Session()
-        self.response = self.session.get(self.login_url, cookies=self.jar)
+        self.response = self.session.get(self.login_url, cookies=self.jar, headers=self.header)
         
     def login_douban(self, redir=domain):
         '''
@@ -48,7 +48,7 @@ class DoubanSpider(object):
         '''
         
         self.pwd['redir'] = redir
-        self.response = self.session.post(self.login_url, headers=self.header, cookies=self.response.cookies, data=self.pwd)
+        self.response = self.session.post(self.login_url, headers=self.header, data=self.pwd)
         print("Posted pwd....")
         
         #for captcha code
@@ -126,11 +126,21 @@ class DoubanSpider(object):
         db.close()
         print("comment crawled succeed.")           
         
-    def post_comment(self, comment, ID=1):
+    def post_comment(self, comment, ID=17):
         '''
         reply to the comment.
         ID is the ID of comments table, is the serial number of the comments
         ''' 
+        self.post_header = {
+            'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.9; rv:32.0) Gecko/20100101 Firefox/32.0',
+            '(Request-Line)':'POST /group/topic/764693784/add_comment HTTP/1.1',
+            'Host':'www.douban.com',
+            'Accept-Language':'zh-cn,zh;q=0.8,en-us;q=0.5,en;q=0.3',
+            'Accept-Encoding':'gzip, deflate',
+            'Connetction':'keep-alive',
+            'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Content-Type':'application/x-www-form-urlencoded',
+        }
         db = MySQLdb.connect(host="localhost", port=3307, user='root', passwd='passwd', db='douban')
         cursor = db.cursor()
         
@@ -143,9 +153,14 @@ class DoubanSpider(object):
         
         #get reply cid, the signal of user name
         ref_cid = re.findall('cid=(\d+)#', reply_url)[0]
-        print ref_cid
         topic_url = re.findall('(.+)\?cid', reply_url)[0]
         post_url = topic_url + "add_comment"
+        
+        #request-line in headers is relative with topic code
+        topic_code = re.findall('topic/(\d+)', topic_url)[0]
+        request_line = 'POST /group/topic/' + topic_code + '/add_comment HTTP/1.1'
+        self.post_header['(Request-Line)'] = request_line
+        
         post_data = {
             'ref_cid':ref_cid,
             'rv_comment':comment,
@@ -155,7 +170,7 @@ class DoubanSpider(object):
         #login
         self.login_douban()
         #import pdb; pdb.set_trace()
-        self.response = self.session.get(reply_url)        
+        self.response = self.session.get(reply_url, headers=self.header)        
         soup = BeautifulSoup(self.response.text)
         #test if login is successful
         login = soup.find_all('li', class_="nav-user-account")
@@ -163,14 +178,16 @@ class DoubanSpider(object):
         #import pdb; pdb.set_trace()    
         #find ck from cookies
         cookies_dict = requests.utils.dict_from_cookiejar(self.session.cookies)
-        post_data['ck'] = cookies_dict['ck']
+        post_data['ck'] = cookies_dict['ck'][1:5]
         #print cookies_dict['ck']
         
-        self.response = self.session.get(reply_url)        
+        #get the Content_Length
+        content_length = str(87 + 3 * len(comment))
+        self.post_header['Content-Length'] = content_length
+        print self.post_header
+        
+        self.response = self.session.get(reply_url, headers=self.post_header)        
         soup = BeautifulSoup(self.response.text)
-        #test if login is successful
-        #login = soup.find_all('li', class_="nav-user-account")
-        #print login
         
         #find start from the html
         try:
@@ -182,15 +199,19 @@ class DoubanSpider(object):
         print("post_data: %s" %post_data)
         #import pdb; pdb.set_trace()
         
-        self.response = self.session.post(post_url, data=post_data)
-        
+        referer_url = re.findall('(.+)#last', reply_url)
+        self.post_header['Referer'] = referer_url[0]
+        #response often takes a long time.
+        try:
+            self.response = self.session.post(post_url, data=post_data, headers=self.header)
+        except(requests.exceptions.ConnectionError):
+            pass
+            
         #check if comment succeed
-        post_ok_url = topic_url + '?start=' + start +'&post=ok'
-        self.response = self.session.get(post_ok_url)
         soup = BeautifulSoup(self.response.text)
         regions = soup.find_all('li', class_="clearfix comment-item")
         for region in regions:
-            if region.find_all(re.compile('youiskk')):
+            if region.find_all(re.compile('user')):
                 print region
                 return
         import pdb; pdb.set_trace()
@@ -203,7 +224,7 @@ def test_crawl_comments():
     
 def test_post_comment():
     spider = DoubanSpider('user', 'password')
-    spider.post_comment('这是一个测试，不必理会。')
+    spider.post_comment('我在测试我的网络，别在意。')
         
 if __name__ == '__main__':
     #test_crawl_comments()
