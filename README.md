@@ -31,6 +31,8 @@ spider.crawl_comments("https://www.douban.com/group/topic/<topic_id>/")
 # spider.post_comment("你好", comment_id=1)
 ```
 
+`crawl_comments` 会先清空本地 `comments` 表，再写入当前话题的评论。
+
 ## 变更说明
 
 - 数据库存储由 MySQL 改为 SQLite。
